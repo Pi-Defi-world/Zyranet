@@ -1,423 +1,513 @@
-# Zyranet — Network Access & Billing Architecture
+# Zyranet redesign plan — campus connectivity for 300+ users
 
-**Status:** Design (v1)
-**Owner:** Zyranet (standalone project)
-**Scope:** Vendor-agnostic paid Wi-Fi access control for the CET-CreativeZone network
-**Stack:** Python 3 + FastAPI, PostgreSQL, FreeRADIUS, CoovaChilli, Telegram bot
-**Runtime:** Self-hosted LAN server (Ubuntu Server)
+The discovery answers point to a clear strategy: build a low-cost, centrally managed campus network that can grow without requiring you to replace all the old equipment.
 
----
+The design must support 3–5 buildings, a converted workspace, 300+ concurrent users, one Starlink connection initially, and a possible second connection later. Because the equipment models are not yet known, we should avoid buying a complete new network before testing what you already own.
 
-## 1. Context & Goals
+I recommend treating this as two connected projects:
 
-### 1.1 What exists
+1. The physical campus network: get reliable internet from Starlink to every building, with appropriate capacity, isolation, and failover options.
+2. The Zyranet software platform: manage identities, network access, devices, monitoring, policies, and reports through one professional interface.
 
-- One **Starlink** dish = the only internet source.
-- **2 × TP-Link routers** — **only router #1 is wired to Starlink** (confirmed). Router #2 is not a WAN peer; it is demoted to access-point/switch mode or retired to eliminate double-NAT / DHCP conflict.
-- **3 × switches** — 2015-era, most likely unmanaged (no VLAN support, no management IP).
-- **4 × Ubiquiti NanoStation M2** — airMAX (airOS) PtMP radios, ~2015. One configured as a **base (AP/PtMP)**, three as **remotes (Station)** bridging separate buildings. Transparent bridges.
-- A handful of indoor/outdoor **access points** that people actually join.
-- Gear was previously operated under **one unified system** (a single controller/settings set) and now needs a reliable, vendor-neutral control layer.
+The network must remain usable if the Zyranet dashboard is temporarily unavailable. Authentication and enforcement should be designed so a web-interface outage does not automatically take down every connected user.
 
-### 1.2 Goals
+## 1. Repository audit: what we can reuse
 
-1. **Structure** — every device has one clear role; traffic flows in one predictable direction.
-2. **One exit point** — a single router does all NAT/DHCP/firewalling; the second router is retired or demoted.
-3. **Seamless roaming** — every AP broadcasts the *same* SSID + password so phones silently roam between buildings.
-4. **Paid guest access** — 15-hour / weekly / monthly vouchers, each **one-time and single-user**, enforced per-user with a time limit.
-5. **Isolated admin network** — staff traffic cannot be reached by guest traffic.
-6. **Vendor-agnostic** — control does not depend on any single AP brand.
-7. **Zero per-message cost** — voucher/OTP delivery via Telegram (free) with SMS fallback.
+I inspected the current `main` branch's README, Docker Compose configuration, database schema, FastAPI entrypoint, authentication routes, device APIs, network-topology APIs, settings, and admin HTML.
 
-### 1.3 Non-goals (this phase)
+The good news is that Zyranet already has a foundation for the new product. We should evolve it instead of throwing everything away.
 
-- **No EduAdmin integration.** Zyranet is a standalone repository (it happens to live inside a larger EduAdmin folder, but it has its own DB, its own auth, its own deployment).
-- No microservice sprawl, no cloud dependency. Everything runs on one box on the LAN.
-- No hardware replacement (yet). The design must work with 2015 gear. Where old gear is genuinely incapable (e.g., 802.1X-enterprise), control is moved upstream to the server, not shoehorned into the radio.
+Keep and extend
 
----
+- FastAPI application and PostgreSQL persistence.
+- Device inventory and discovery history.
+- Network topology editor and SNMP discovery scaffolding.
+- Live RADIUS session reporting.
+- Admin authentication foundation and dashboard shell.
+- Docker-based development and deployment approach.
 
-## 2. Hardware Constraints — What the 2015 Gear Can and Cannot Do
+Refactor substantially
 
-This is the most important section. Design decisions below are driven by these limits.
+- Voucher-oriented users and access policies.
+- Revenue-centric dashboard and navigation.
+- Topology and device data model.
+- Authentication, permissions, monitoring, and network integrations.
+- Configuration management and deployment assumptions.
 
-| Capability | NanoStation M2 (airOS 5.x) | TP-Link 2015 router (Archer/TL-WR) | TP-Link 2015 switch |
-|---|---|---|---|
-| Radio security | WPA2-PSK (AES) ✓ | WPA2-PSK (AES) ✓ | n/a |
-| **WPA2-Enterprise / 802.1X (RADIUS per-user)** | ✗ Not supported | ✗ Not supported | n/a |
-| **Native captive portal / guest hotspot** | ✗ None | Guest Network (basic, no RADIUS invoice) | n/a |
-| VLAN tagging (802.1Q) | ✗ | ✗ (limited) | ✗ unlikely |
-| Management UI | airOS @ `https://192.168.1.20`, `ubnt/ubnt` | `http://192.168.0.1` → `tplinkwifi.net`, `admin/admin` | none |
-| Bridge mode | ✓ (default) | ✓ (AP mode) | — |
+Remove from the core product
 
-**Consequence:** the old radios *cannot* authenticate individual users at the radio. There is no way to make a NanoStation M2 and a 2015 TP-Link do per-user voucher RADIUS at the radio level. 
+- Flutterwave and Paystack checkout.
+- Transaction and pricing-plan workflows.
+- Payment-specific voucher activation.
+- Termii/SMS purchase delivery and payment-specific configuration.
+- Telegram purchase flows, unless a separate operational notification use case justifies keeping the bot.
 
-**The escape route:** stop trying. Treat old APs and NanoStations as **pure transparent bridges / radios** (which is exactly what they are good at), and enforce *all* access control at **one central captive-portal server** that every guest's traffic is forced through. The AP's only job is to let a phone join the radio; the server decides whether the phone gets the internet.
+### Specific repository changes
 
-This makes the design **vendor-agnostic by construction** — because the control point is your server, not the AP brand. Any AP (airOS, TP-Link, UniFi, whatever you buy later) works the same way.
+These are grounded in the files I inspected:
 
----
+| Existing file/module                          | Proposed change                                                                                                          |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `app/main.py`                                 | Keep the application entrypoint; separate monitoring workers from API startup and tighten CORS configuration.            |
+| `app/routers/payments.py`                     | Remove from the core API after identifying and migrating all dependencies.                                               |
+| `app/routers/vouchers.py`                     | Replace purchase/activation workflows with access-policy and temporary guest-access workflows.                           |
+| `app/routers/auth.py`                         | Expand beyond the current login endpoint into user lifecycle, sessions, roles, and secure administration.                |
+| `app/routers/devices.py`                      | Keep inventory and discovery; add building/location assignment, health state, and manageable-device capabilities.        |
+| `app/routers/network.py`                      | Keep the topology editor; make physical links, VLANs, device relationships, and discovery confidence explicit.           |
+| `app/services/scanner.py`                     | Keep basic LAN discovery, but distinguish a device being observed on a subnet from knowing its actual Wi-Fi association. |
+| `db/schema.sql`                               | Introduce a versioned migration strategy and new school, identity, policy, location, and monitoring models.              |
+| `app/static/admin.html` and `app/static/css/` | Redesign the interface around network operations rather than vouchers and revenue.                                       |
+| `docker-compose.yml`                          | Reconcile the deployment with the actual network services and document a production-safe topology.                       |
 
-## 3. Target Topology
+Source files: [application entrypoint](https://github.com/Pi-Defi-world/Zyranet/blob/main/app/main.py?utm_source=chatgpt.com), [database schema](https://github.com/Pi-Defi-world/Zyranet/blob/main/db/schema.sql?utm_source=chatgpt.com), [network API](https://github.com/Pi-Defi-world/Zyranet/blob/main/app/routers/network.py?utm_source=chatgpt.com), [device API](https://github.com/Pi-Defi-world/Zyranet/blob/main/app/routers/devices.py?utm_source=chatgpt.com).
 
-### 3.1 Physical layout
+### Four important findings to resolve early
+
+1. The current deployment files disagree with the documented deployment. The README describes PostgreSQL, API, Telegram bot, and FreeRADIUS in the Docker stack, but the inspected `docker-compose.yml` defines only PostgreSQL, API, and bot. We need to establish how RADIUS and CoovaChilli are actually deployed before designing migration steps.
+2. Authentication is still administrator-centric. The inspected auth router exposes a username/password login that returns a token. That is not yet a complete school identity system with student accounts, staff roles, provisioning, and account lifecycle management.
+3. The database is tightly coupled to payments. The current schema contains payment providers, transaction records, purchase plans, and vouchers. We need a migration that preserves useful device history and administrative records while removing the old business model safely.
+4. Network discovery has limits. The current scanner reads local ARP/neighbour information and records sightings. This can identify some devices, but it cannot reliably reveal all clients, their associated access point, signal quality, or actual throughput across every building. Those capabilities require compatible network hardware, controller telemetry, SNMP, or other supported integrations.
+
+One additional issue: the inspected FastAPI entrypoint allows all CORS origins. Before exposing the new dashboard beyond a trusted development environment, we should restrict browser origins, secure the token lifecycle, enforce authorization on every management action, and verify that secrets and management interfaces are not exposed to guest networks.
+
+Migration rule: do not simply delete the old tables or overwrite the existing database. Back up the database, introduce versioned migrations, preserve useful inventory and topology data, and retire payment-related records according to the school's retention requirements.
+
+## 2. Recommended physical network topology
+
+For 300+ concurrent users across several buildings, we should separate the internet gateway, campus distribution, management services, and user networks.
+
+Starlink — primary WAN
+
+Possible second WAN in a later phase
+
+VLAN-capable main gateway
+
+Firewall, DHCP, routing, DNS policy, QoS, WAN failover
+
+Core managed switch
+
+Building uplinks, network segmentation, PoE where supported
+
+ICT services
+
+Zyranet, database, monitoring, RADIUS
+
+Management network
+
+Switch, router, radio and AP administration
+
+Wired building uplinks
+
+Ethernet or fiber to remote distribution switches
+
+Wireless building bridges
+
+Existing outdoor transmitters and receivers where needed
+
+Access layer — each building
+
+Local switches → indoor access points → student, staff and guest devices
+
+The diagram represents the target logical design, not a claim that your existing devices support all of it.
+
+### Network separation
+
+I recommend planning the following logical networks. The exact IP ranges should be selected after inventorying the existing LANs to avoid address conflicts.
+
+| Network        | Purpose                                     | Access rule                                     |
+| -------------- | ------------------------------------------- | ----------------------------------------------- |
+| Management     | Router, switch, radio and AP administration | ICT administrators only                         |
+| Servers        | Zyranet, database, RADIUS and monitoring    | Explicitly permitted services                   |
+| Staff          | Staff and administrative devices            | School-approved resources                       |
+| Students       | Student devices                             | Internet and permitted learning resources       |
+| Labs/workspace | Shared computers and workspace devices      | Policy-based access                             |
+| Guest          | Visitors and temporary users                | Internet only, client isolation where supported |
+
+Use VLANs on managed switches and the gateway wherever possible. Existing unmanaged switches can be retained for carefully chosen edge segments, but they must not be treated as security boundaries.
+
+If the old equipment cannot support the required isolation, the correct response is to change where that segment connects or replace the particular device—not to assume the dashboard can compensate for a missing network control.
+
+## 3. Hardware reuse and minimum procurement plan
+
+With a minimal budget, our objective is not to buy a new network. It is to identify the smallest number of upgrades needed to make the existing network reliable and secure.
+
+### Equipment inventory
+
+Before purchasing anything, record each device's model, hardware revision, firmware, power supply, port speeds, PoE requirements, operating condition, and current role.
+
+| Existing equipment                 | Reuse strategy                                                                          | Replace only if…                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Starlink                           | Keep as the initial WAN                                                                 | Its performance, placement, or service limitations prevent the required operation       |
+| Main router                        | Keep if it supports the required routing, firewall rules, VLANs, and bandwidth controls | It cannot enforce the network policies we need                                          |
+| Indoor access points               | Retain working units for coverage and low-density areas                                 | They cannot support adequate capacity, security, or reliable operation                  |
+| Outdoor transmitters and receivers | Reuse as building bridges if compatible and stable                                      | The link is unreliable, lacks adequate throughput, or cannot meet security requirements |
+| Unmanaged switches                 | Retain for appropriate edge connections                                                 | VLAN separation, monitoring, or uplink capacity is needed at that point                 |
+| LAN cables                         | Test, label, and reuse serviceable runs                                                 | They fail testing, are damaged, or are unsuitable for the run                           |
+| Existing server or spare computer  | Host Zyranet and network services initially                                             | It cannot provide stable operation, storage, or sufficient resources                    |
+
+### What I would prioritize buying
+
+Priority 1 — A capable main gateway, if your current router fails the audit
+
+It must support VLANs, firewall policies, DHCP, routing, bandwidth management, and preferably multi-WAN failover. Do not buy a second Starlink or an expensive router before confirming this gap.
+
+Priority 2 — Managed switches at strategic distribution points
+
+Start with the core and any building connection that requires VLAN separation. Verify port counts, uplink speed, and PoE needs before choosing models.
+
+Priority 3 — Additional access points only where measurements show a gap
+
+A target of 300+ concurrent users does not automatically mean a particular number of APs. Client mix, airtime utilization, interference, room layout, and radio capacity determine the real requirement.
+
+Priority 4 — Cable testing, power protection, and link repairs
+
+A cable tester, proper termination tools, labeled patch cables, and appropriate surge protection may deliver more value than replacing equipment that still works.
+
+I would not set a hardware budget in naira yet. We don't know the models, how many access points work, which cables reach each building, or whether the main router can support VLANs. Giving a fixed shopping list now risks spending money on equipment you already have or buying components that are incompatible.
+
+### How to handle 300+ concurrent users
+
+Treat 300 as a capacity target to validate, not just a client count to display.
+
+- Measure the actual Starlink download and upload speeds during busy periods.
+- Estimate simultaneous video calls, classroom streaming, downloads, browsing, and administrative traffic.
+- Survey each building for coverage, interference, and usable throughput.
+- Test the busiest areas under realistic load.
+- Prioritize interactive educational traffic over bulk downloads where appropriate.
+- Record where the bottleneck occurs: WAN, radio backhaul, access point, switch uplink, or server.
+
+A well-placed AP with a clean wired backhaul can outperform several poorly placed APs sharing a congested wireless uplink.
+
+For building-to-building links, prefer existing wired runs when they are suitable. Where wireless bridges are necessary, use dedicated backhaul radios where available rather than forcing all building traffic through a congested client-facing radio.
+
+## 4. Authentication: the school-friendly model
+
+Since you have not chosen an identity provider, I recommend a staged approach that supports individual accountability without making initial deployment too expensive.
+
+## Recommended identity strategy
+
+School-managed identity
+
+Maintain users, roles, status, groups, and access eligibility in Zyranet initially. Support imports from existing student/staff records using a controlled CSV process, with an API integration added later if needed.
+
+Staff and privileged accounts
+
+Use individual accounts, strong passwords, and multifactor authentication for administrators. Use enterprise Wi-Fi authentication on compatible equipment; do not rely on a shared staff password as the long-term design.
+
+Student-owned devices
+
+Start with a secure captive portal using individual school credentials if the gateway supports it reliably. Add enterprise Wi-Fi authentication and supported device onboarding as the network is upgraded.
+
+Guest access
+
+Staff-approved temporary accounts or access codes with expiry, usage limits, and internet-only permissions. No payment process is required.
+
+### Important authentication details
+
+- RADIUS remains a candidate, not a commitment. Keep FreeRADIUS if it fits the selected gateway and access-point ecosystem.
+- CoovaChilli is conditional. Retain it only if the chosen captive-portal design and network topology justify it. It should not be placed into the architecture simply because the old project used it.
+- Use WPA2/WPA3-Enterprise where supported for individual network credentials. Legacy access points may need to be replaced in selected locations.
+- MAC address registration can be useful for inventory and device policies, but randomized MAC addresses make it unsuitable as the sole identity or security mechanism.
+- Keep student, staff, guest, and management traffic isolated at the network layer. A user being authenticated must not automatically give them access to every internal resource.
+- Use an explicit account lifecycle: pending → active → suspended/expired. Disabling an account should revoke future authentication and terminate active sessions where the network supports it.
+
+### Proposed identity data model
+
+Rather than making Telegram the primary identity, introduce school-centric entities:
+
+- `users` — account identity, status, and timestamps.
+- `roles` and `user_roles` — administrator, ICT operator, staff, student, and guest permissions.
+- `groups` — classes, departments, staff teams, and other school groups.
+- `devices` and `user_devices` — inventory and optional user/device associations.
+- `access_policies` — network, group, schedule, quota, and session rules.
+- `auth_events` and `sessions` — authentication outcomes, active sessions, and revocation records.
+- `locations` — campus, building, floor, room, and network zone.
+
+Keep these concepts separate from the network equipment's own credentials. A Zyranet administrator login should not automatically grant unrestricted SSH, SNMP, or router-configuration access.
+
+## 5. Redesigned Zyranet software architecture
+
+I'd keep a modular monolith for the first release. It is easier to deploy and maintain on a limited budget, while still allowing the project to add separate workers when monitoring load justifies them.
+
+\#chatgpt-mermaid-\_r_km\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;fill:rgb(237, 237, 237);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_km\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_km\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_km\_ .error-icon{fill:rgb(48, 48, 48);}#chatgpt-mermaid-\_r_km\_ .error-text{fill:rgb(237, 237, 237);stroke:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_km\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_km\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_km\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_km\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_km\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_km\_ .marker.cross{stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_km\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:16px;}#chatgpt-mermaid-\_r_km\_ p{margin:0;}#chatgpt-mermaid-\_r_km\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .cluster-label text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .cluster-label span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_km\_ .label text,#chatgpt-mermaid-\_r_km\_ span{fill:rgb(237, 237, 237);color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .node rect,#chatgpt-mermaid-\_r_km\_ .node circle,#chatgpt-mermaid-\_r_km\_ .node ellipse,#chatgpt-mermaid-\_r_km\_ .node polygon,#chatgpt-mermaid-\_r_km\_ .node path{fill:rgb(9, 23, 44);stroke:rgb(31, 78, 148);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .rough-node .label text,#chatgpt-mermaid-\_r_km\_ .node .label text,#chatgpt-mermaid-\_r_km\_ .image-shape .label,#chatgpt-mermaid-\_r_km\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_km\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .rough-node .label,#chatgpt-mermaid-\_r_km\_ .node .label,#chatgpt-mermaid-\_r_km\_ .image-shape .label,#chatgpt-mermaid-\_r_km\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_km\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_km\_ .root .anchor path{fill:rgb(175, 175, 175)!important;stroke-width:0;stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_km\_ .arrowheadPath{fill:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_km\_ .edgePath .path{stroke:rgb(175, 175, 175);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .flowchart-link{stroke:rgb(175, 175, 175);fill:none;}#chatgpt-mermaid-\_r_km\_ .edgeLabel{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_km\_ .edgeLabel p{background-color:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_km\_ .edgeLabel rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_km\_ .labelBkg{background-color:rgba(0, 0, 0, 0.5);}#chatgpt-mermaid-\_r_km\_ .cluster rect{fill:rgb(48, 48, 48);stroke:rgba(255, 255, 255, 0.15);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .cluster text{fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ .cluster span{color:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";font-size:12px;background:rgb(48, 48, 48);border:1px solid rgba(255, 255, 255, 0.15);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_km\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(237, 237, 237);}#chatgpt-mermaid-\_r_km\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_km\_ .icon-shape,#chatgpt-mermaid-\_r_km\_ .image-shape{background-color:rgb(0, 0, 0);text-align:center;}#chatgpt-mermaid-\_r_km\_ .icon-shape p,#chatgpt-mermaid-\_r_km\_ .image-shape p{background-color:rgb(0, 0, 0);padding:2px;}#chatgpt-mermaid-\_r_km\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_km\_ .image-shape .label rect{opacity:0.5;background-color:rgb(0, 0, 0);fill:rgb(0, 0, 0);}#chatgpt-mermaid-\_r_km\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_km\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_km\_ .node .neo-node{stroke:rgb(31, 78, 148);}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_km\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_km\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_km\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node .neo-line path{stroke:rgb(31, 78, 148);filter:none;}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_km\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_km\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_km\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_km\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_km\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_km\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(153, 206, 255);}#chatgpt-mermaid-\_r_km\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_km\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_km\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .node rect,#chatgpt-mermaid-\_r_km\_ .node circle,#chatgpt-mermaid-\_r_km\_ .node ellipse,#chatgpt-mermaid-\_r_km\_ .node polygon,#chatgpt-mermaid-\_r_km\_ .node path{fill:rgb(0, 40, 77);stroke:rgba(255, 255, 255, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_km\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_km\_ .mermaid-decision .label-container{fill:rgb(0, 14, 26);stroke:rgb(26, 62, 95);stroke-dasharray:2,2;}#chatgpt-mermaid-\_r_km\_ .edgePaths .flowchart-link{stroke:rgb(175, 175, 175);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_km\_ .marker{fill:rgb(175, 175, 175);stroke:rgb(175, 175, 175);}#chatgpt-mermaid-\_r_km\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,"Segoe UI",Helvetica,"Apple Color Emoji",Arial,sans-serif,"Segoe UI Emoji","Segoe UI Symbol";}Zyranet Web DashboardStudent and Guest PortalFastAPI ApplicationIdentity and Policy ModuleInventory and TopologyModuleMonitoring and AlertsNetwork Device AdaptersPostgreSQLFreeRADIUSGateway, Switches, Radios, APs
+
+The key boundary is between desired configuration and observed network state. An administrator might configure a policy, but Zyranet should show whether that policy was actually applied, rejected, or could not be verified.
+
+### Proposed repository structure
+
+This is the target structure, not a claim that these modules already exist.
 
 ```
-                       [ STARLINK DISH ]
-                              │  Ethernet (WAN)
-                              ▼
-                ┌────────────────────────────┐
-                │  TP-Link Router #1 (ONLY)   │   <- single gateway: NAT + DHCP + firewall
-                │  second router = retired    │      or demoted to AP/switch mode
-                └──────────────┬─────────────┘
-                               │  LAN (VLAN-Untagged / default VLAN)
-                               ▼
-                      ┌──────────────────┐
-                      │ Switch 1 (CORE)   │   <- unmanaged is fine; just a distribution point
-                      └──┬────┬────┬─────┘
-                         │    │    └────────────────────────┐
-                         ▼    ▼                             ▼
-              ┌────────┐ ┌────────┐   ┌───────────────┐  ┌─────────────────────┐
-              │Switch 2│ │Switch 3│   │ NanoStation M2│  │ ZYRANET SERVER      │
-              │Bldg A  │ │Bldg B  │   │ BASE (PtMP)   │  │ FreeRADIUS + Chilli │
-              └───┬────┘ └───┬────┘   └──────┬────────┘  │ + Postgres + FastAPI│
-                  ▼          ▼      air link │           └─────────┬───────────┘
-            [indoor APs]  [indoor APs]        ▼                     │
-            (radio only)  (radio only)   ┌────────┬────────┐       │
-                                         ▼        ▼        ▼       │
-                                   NanoStation NanoStation NanoStation
-                                   REMOTE 1     REMOTE 2   REMOTE 3
-                                       │           │          │
-                                      [switch]    [switch]   [switch]
-                                                                 │
-                                      Each remote feeds local     │
-                                      APs (radio only) ---------─┼── control plane
-                                                                 ▼
-                                     Guest traffic is NAT'd to gateway;
-                                     the ZYRANET SERVER sits inline on the
-                                     guest subnet to enforce the portal.
+Zyranet/
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── security.py
+│   ├── routers/
+│   │   ├── auth.py
+│   │   ├── users.py
+│   │   ├── policies.py
+│   │   ├── devices.py
+│   │   ├── network.py
+│   │   ├── monitoring.py
+│   │   └── reports.py
+│   ├── services/
+│   │   ├── identity/
+│   │   ├── access_control/
+│   │   ├── inventory/
+│   │   ├── topology/
+│   │   ├── monitoring/
+│   │   └── adapters/
+│   ├── models/
+│   ├── schemas/
+│   └── static/
+├── db/
+│   ├── migrations/
+│   └── schema.sql
+├── raddb/
+├── chilli/
+├── deploy/
+├── tests/
+├── docs/
+│   ├── architecture/
+│   ├── network-design/
+│   ├── operations/
+│   └── security/
+├── docker-compose.yml
+└── pyproject.toml
 ```
 
-### 3.2 Logical separation
-
-Because 2015 switches are almost certainly **unmanaged** (no VLAN support), classic 802.1Q segmentation is off the table for now. We use **IP-subnet + firewall segmentation** instead, which any modern TP-Link gateway supports and needs no switch cooperation:
-
-| Zone | Purpose | Subnet | SSID / device |
-|---|---|---|---|
-| **Z_Admin** | Staff, ICT, management plane | `10.10.20.0/24` | `CET-Admin` (hidden, WPA2-PSK) + server/AP web UIs |
-| **Z_Guest** | Paid public access | `172.16.30.0/24` | `CET-CreativeZone` (open/PWK, portal-controlled) |
-
-- Both zones travel the same wires (no VLAN tags). Separation is done at the **gateway firewall** (allow/deny between `10.10.20.0/24` and `172.16.30.0/24`).
-- Upgrade path: when you replace switches, tag these same subnets as VLAN 20 / VLAN 30 for true isolation. The subnets already match that plan.
-
-### 3.3 Where control is enforced
-
-- **Gateway router (TP-Link #1):** the single internet exit. Firewall rule set. Guest subnet is only allowed to reach the internet, the Chilli portal, and DNS — never `10.10.20.0/24` or management IPs.
-- **Zyranet server (CoovaChilli + FreeRADIUS):** the only thing granting guest internet access.
-- **All APs / NanoStations:** radios and bridges only. No access decisions.
-
----
-
-## 4. Server Platform
-
-### 4.1 Host
-
-- **OS:** Ubuntu Server 22.04 LTS (x86_64, >=1GB RAM, 20GB disk) — a VM or a spare mini-PC on the LAN.
-- **Location:** fixed static IP in `Z_Admin`, e.g. `10.10.20.10`.
-- **Two NICs required** for CoovaChilli:
-  - `eth0` (management) → `10.10.20.10`, used for admin/API/RADIUS control.
-  - `eth1` (guest gateway) → `172.16.30.1`, the default gateway of the guest subnet, where CoovaChilli lives.
-- **Clock sync is mandatory** for RADIUS (`systemd-timesyncd` / `chrony`).
-
-### 4.2 Components
-
-| Component | Role | Listen |
-|---|---|---|
-| **PostgreSQL 16** | Single source of truth (vouchers, plans, radius data, payments) | `5432` (localhost) |
-| **FreeRADIUS 3** | RADIUS auth/accounting, `rlm_sql` against Postgres | `1812/udp`, `1813/udp` |
-| **CoovaChilli** | Captive portal daemon (guest VLAN 30 gateway) | `3999` (chilli), portal on `80` |
-| **daloRADIUS** | Web UI for RADIUS users/sessions/accounting (**admin UI #2**) | `80` (localhost→admin) |
-| **FastAPI backend** | Voucher/payment/bot APIs + **admin dashboard (UI #1)** | `8000` (localhost) |
-| **Telegram bot (aiogram)** | Purchase, OTP/voucher delivery | via webhook → FastAPI `8443` |
-| **systemd / cron** | Services, maintenance jobs | — |
-
-> **CoovaChilli is the linchpin.** It is what makes this work with old gear: it sits as the guest gateway, intercepts a guest's first HTTP request, redirects them to a login page where they enter a voucher, and — only after FreeRADIUS says the voucher is valid — opens a firewall rule granting internet. Every AP, old or new, just needs to hand guests a DHCP lease that points to Chilli as the gateway.
->
-> **Guest line termination (confirmed):** the server runs a single LAN NIC. Chilli services guest DHCP (`172.16.30.0/24`, `gateway = <server IP on 172.16.30.2>` alias) and forwards guest internet upstream to the gateway router. The full path is `phone → AP → switch → router → server(config)`, and Chilli is the guest's default gateway so it sees every packet. No second VLAN interface or re-wiring required.
-
-> **Why CoovaChilli and not the AP vendors' portals:** the old APs have no portal. CoovaChilli runs on *your* server and works behind *any* AP. It is open-source, speaks WISPr to FreeRADIUS natively, and is the standard companion of FreeRADIUS for this exact scenario.
-
----
-
-## 5. Data Model (PostgreSQL)
-
-Business tables (app-owned) plus the FreeRADIUS operational tables (standard names so `rlm_sql` works out of the box, no custom SQL module needed).
-
-```
-┌────────────────────┐     ┌──────────────────────────────┐
-│ plans              │     │ vouchers                     │
-├────────────────────┤     ├──────────────────────────────┤
-│ id            pk   │1─∞  │ id             pk            │
-│ name               │     │ code           unique (*)    │
-│ duration_seconds   │     │ plan_id        fk → plans    │
-│ price_kobo         │     │ valid_from     timestamptz   │
-│ price_currency     │     │ valid_until    timestamptz   │
-│ active   bool      │     │ mac_address    (bound MAC)    │
-│                    │     │ status  enum('unused','active','expired','revoked') │
-└────────────────────┘     │ created_at / used_at          │
-                           │ telegram_chat_id  nullable     │
-      telephone            │ max_devices int (default 1)    │
-      (see users)        │──────────────────────────────│
-                           └──────────────┬───────────────┘
-                                          │
-        ┌────────────────────┐   ┌────────▼────────────────────┐
-        │ transactions        │   │ redeemed_devices            │
-        `────────────────────`   ├──────────────────────────────┤
-        id pk                   │ id pk                        │
-        voucher_id fk → voucher │ voucher_id fk → vouchers     │
-        user_id    fk → users   │ mac_address                  │
-        amount_kobo             │ first_seen / last_seen       │
-        provider enum('flutterwave','paystack') │ (UNIQUE voucher_id+mac; │
-        provider_ref unique     │  count enforces Simultaneous-│
-        status enum('pending','paid','failed') │ Use)           │
-        created_at / paid_at    └──────────────────────────────┘
-
-   ┌───────────────┐      FreeRADIUS operational tables
-   │ users          │      ┌─────────┐ ┌─────────┐ ┌──────────────┐
-   ├───────────────┤      │ radcheck │ │ radreply │ │ radacct/     │
-   │ id pk         │      ├─────────┤ ├─────────┤ │ radpostauth  │
-   │ telegram_id   │      │ username │ │ username │ │              │
-   │ username      │      │ attribute│ │ attribute│ │              │
-   │ telegram_name │      │ op       │ │ op       │ │              │
-   │ phone         │      │ value    │ │ value    │ │              │
-   │ unique 1️⃣     │      └─────────┘ └─────────┘ └──────────────┘
-   │ flutterwave_  │
-   │  customer_id  │      Each user is a distinct account and holds
-   │ paystack_     │      its own provider reference(s): `flutterwave_
-   │  customer_id  │      customer_id` and `paystack_customer_id`, so
-   │ created_at    │      a purchase is always attributed to the buyer.
-   └───────────────┘
-```
-
-### 5.1 How a voucher maps into RADIUS
+The existing `app/routers/` and `app/services/` layout already gives us a starting point. I would not reorganize every file in one giant refactor. Introduce the new modules incrementally and migrate each existing route with tests.
 
-FreeRADIUS `rlm_sql` reads `radcheck` / `radreply` by default. When a voucher is **activated** (first successful login), the backend writes:
+### Database migration plan
 
-- `radcheck`: `username = <voucher-code>`, `attribute = Cleartext-Password`, `value = <voucher-code>`
-- `radreply`: `username = <voucher-code>`, `attribute = Session-Timeout`, `value = <seconds-remaining>` → kicks the user after their plan duration.
-- `radreply`: `username = <voucher-code>`, `attribute = Simultaneous-Use`, `value = <max_devices>` → caps devices per voucher.
+Keep the existing `devices`, `device_sightings`, and `topology_document` data where it is useful. Introduce versioned migrations for the new entities, then move the application away from payment-specific tables.
 
-Because this is the **standard** FreeRADIUS schema, it works identically for CoovaChilli, and later for any vendor that does 802.1X/RADIUS, with **zero per-vendor code**.
+Do not use the current `schema.sql` as a fresh production database initialization strategy indefinitely. It seeds purchase plans and uses `CREATE TABLE IF NOT EXISTS`, which is not a substitute for controlled upgrades to an existing database.
 
-### 5.2 Concurrency rule
+For the first release, I would add:
 
-`redeemed_devices` holds one row per (`voucher_id`, `mac_address`). On each login, the portal checks:
-`SELECT count(*) FROM redeemed_devices WHERE voucher_id = :id` and denies if `>= max_devices`. With `max_devices = 1`, a voucher is **single-use**: it binds to exactly one device MAC and is used once, so the printed code cannot be passed around.
+- Campus locations and hierarchical building records.
+- Network devices and their supported capabilities.
+- Physical and logical links.
+- User identities, groups, roles, and lifecycle status.
+- Access policies and policy assignments.
+- Authentication events and session records.
+- Monitoring measurements, alerts, and audit logs.
+- Configuration changes, deployment status, and failure records.
 
-### 5.3 DDL (contract)
+### Monitoring: what the dashboard can really show
 
-See `db/schema.sql` (added with the app) — the above is the authoritative shape. Key invariants:
-- `voucher.code` UNIQUE.
-- `plan.duration_seconds` drives `valid_until` at redemption.
-- All money in kobo (integer) to avoid float errors.
-- `status` transitions only forward: `unused → active → expired|revoked`.
+We should support different telemetry levels instead of inventing metrics.
 
----
+| Data source                   | What Zyranet can reasonably report                                                      |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| Local ARP/neighbour discovery | Devices recently observed on a reachable subnet                                         |
+| FreeRADIUS accounting         | Authenticated sessions and reported session usage                                       |
+| SNMP on supported devices     | Interface counters, status, and device metrics exposed by the equipment                 |
+| Supported controller/API      | Client association, radio health, signal metrics, and AP-specific details where exposed |
+| Active probes                 | Connectivity, latency, packet loss, and DNS reachability                                |
+| Gateway metrics               | WAN throughput and connection health, subject to device support                         |
 
-## 6. Authentication Flow (Voucher → Internet)
+The interface should label stale, unavailable, and estimated values explicitly. For example, an access point last seen ten minutes ago is not necessarily offline; it may simply be unmonitored or unreachable from the management subnet.
 
-```
-[Guest phone] joins "CET-CreativeZone" (WPA2-PSK — everyone can join the radio)
-     │  DHCP lease: IP=172.16.30.x, gateway=172.16.30.1 (Chilli)
-     ▼
-[ CoovaChilli @172.16.30.1 ]  intercepts first HTTP request
-     │  redirects browser → portal login page :80/login
-     ▼
-[ Portal page ]  user types VOUCHER CODE
-     │  Chilli sends RADIUS Access-Request  (User-Name = voucher, User-Password = voucher)
-     ▼
-[ FreeRADIUS ] ── rlm_sql ──► [ PostgreSQL ]
-     │                                 │
-     │  1. find voucher by code        │
-     │  2. check valid_from <= now <= valid_until
-     │  3. check redeemed_devices < max_devices
-     │  4. bind MAC address (first use)
-     │         │
-     │   Access-Accept + Session-Timeout
-     ◄──────────────────────────────┘
-     ▼
-Chilli opens a firewall rule for this IP → guest is live.
-Session ends at Session-Timeout; on re-login the same flow re-binds the
-already-registered MAC so it re-auths instantly (accounting continues).
-```
-
-Notes:
-- **MAC re-auth / session persistence:** once a MAC is bound to a valid voucher, Chilli can be configured to auto-skip the login for that MAC (WISPr `sessionid` + FreeRADIUS MAC-auth), so a returning user with a live session isn't re-prompted.
-- **Expiry:** FreeRADIUS simply fails auth when `valid_until` passes, so the guest is dropped. No polling job needed for enforcement.
-- **Accounting** (`radacct`) logs each session for billing/reporting in daloRADIUS.
-
-### 6.1 Admin network
-
-`CET-Admin` uses **WPA2-PSK** (shared passphrase, hidden SSID) because old gear cannot do enterprise. Staff PCs get a DNS name / static lease; guest traffic can never route to `10.10.20.0/24` thanks to the gateway firewall. This is a pragmatic, achievable isolation for 2015 hardware.
-
----
-
-## 7. FreeRADIUS Configuration Reference
-
-Located under `raddb/`. Key files:
-
-- `raddb/mods-enabled/sql` — DSN to Postgres, `read_clients = no` (clients are the APs, not the DB), `acct_unique = no` for testing, `postauth_query` logging.
-- `raddb/mods-enabled/detail` — add `Detail-Traffic` etc. only if needed.
-- `raddb/clients.conf` — every AP / Chilli that will talk RADIUS:
-  ```
-  client chilligw {
-      ipaddr = 172.16.30.1
-      secret = ZYRANET_REQUIRED_LONG_RANDOM_SECRET
-      shortname = chilli-gateway
-      nastype = other
-  }
-  ```
-- `raddb/sites-enabled/default` and `raddb/sites-enabled/inner-tunnel` — auth framework; the Chilli auth uses the `default` site's `authorize`/`authenticate` (WISPr), NOT `inner-tunnel` (that's for 802.1X).
-- `raddb/dictionary` — ensure WISPr attributes present (CoovaChilli uses `ChilliSpot` + `WISPr` dictionaries; ship the `chillispot` dictionary).
-- CoovaChilli RADIUS: `chilli.conf` → `uamallowed`, the RADIUS host/secret matching the `chilligw` client above.
+## 6. The user interface and operating experience
 
-> Full working configs ship with the PoC in phase 3. The doc-level requirement: Chilli and FreeRADIUS share one secret, and FreeRADIUS treats the Chilli gateway as a trusted client.
+The admin portal should be built around daily tasks the school's ICT team actually performs.
 
----
+## Proposed dashboard home
 
-## 8. Per-Vendor Integration Reference (old hardware)
+Internet
 
-These are the *radio* settings only — access control is on the server. Interfaces differ by age; these are the ones your units use.
+# Healthy / Degraded
 
-### 8.1 NanoStation M2 (airOS)
+Based on live probes
 
-- **Access its UI:** ethernet directly, laptop static `192.168.1.10`, browse `https://192.168.1.20` (default `ubnt`/`ubnt`). If already on the fabric, find its IP via **Fing**.
-- **Main tab:** confirm **Wireless Mode** — `Access Point (PtMP)` for the base, `Station (PtMP)` for remotes. The base SSID name must appear in every remote's SSID field (that's how they pair).
-- **Network tab:** set **Bridge mode** (not Router) on all — otherwise you get double-NAT.
-- **Radio config:** WPA2-AES + a single shared passphrase for `CET-CreativeZone`. Do **not** attempt 802.1X-enterprise (unsupported).
-- **Align tab:** only for diagnosing weak base↔remote links.
+Connected clients
 
-### 8.2 TP-Link router (2015, single gateway)
+# Live count
 
-- **UI:** `http://192.168.0.1` or `http://tplinkwifi.net` (label on underside), `admin`/`admin`.
-- **WAN:** confirm it's the unit physically wired to the Starlink ethernet port.
-- **LAN → DHCP:** enabled; hand out `10.10.20.x` on the admin side. Guest subnet (`172.16.30.0/24`) is handed out by CoovaChilli, so turn DHCP off there if the router also covers it.
-- **Wireless:** `CET-CreativeZone` (PSK) + `CET-Admin` (PSK, hidden). Enable "Guest Network" only if the VLAN-30 line comes from the router; best case the guest line terminates on the Zyranet server.
-- **Decision rule:** the router with a live WAN to Starlink is the gateway. The other router: **unplug**, or set to **Access Point mode** (its DHCP/NAT off) if you need its radio/ports.
-- **Firewall:** allow `Z_Guest → WAN` and `Z_Guest → DNS` only; deny `Z_Guest → Z_Admin`.
+From available telemetry
 
-### 8.3 Switches (2015)
+Network devices
 
-- Most are **unmanaged** — no IP, no dashboard, plug-and-forward. Run **Fing** to confirm which (if any) expose a management IP.
-- For any managed one, log in and label ports ("Port 3 → NanoStation Base", "Port 5 → Switch 2 uplink"). **Label the cables** — this is the single biggest de-chaos step.
-- Treat access control as the router-firewall + Chilli job (Section 3.2), not a switch VLAN job, until you replace switches.
+# Healthy / Alerting
 
----
+By location
 
-## 9. Telegram Bot + FastAPI Design
+Open incidents
 
-### 9.1 Stack
+# Prioritized list
 
-- **FastAPI** (`app/`) — REST API + webhook receiver, `asyncpg` for Postgres, Pydantic schemas, SQLAlchemy for ORM/migrations (Alembic).
-- **aiogram 3** (`bot/`) — Telegram bot. Webhook mode (no polling on the LAN server; use an inbound endpoint on `8443`).
+With acknowledgment and history
 
-### 9.2 Purchase & delivery flow
+Primary navigation
 
-```
-[User] /start → /buy → inline buttons: 15h | Weekly | Monthly
-     │                                  (from `plans` table)
-     ▼
-[FastAPI] upserts a `users` row for the buyer (unique account, per-user
-          flutterwave_/paystack_ customer_id) → creates `vouchers` (unused)
-          + `transactions` (pending) rows
-     ▼
-[Payment] Checkout via chosen provider — Flutterwave or Paystack
-          (per-user unique account, e.g. Paystack customer_code /
-          Flutterwave customer id, so chargebacks trace to the buyer)
-          │  provider webhook → FastAPI /webhooks/payment/{flutterwave|paystack}
-     ▼
-[Confirm] mark transaction 'paid'; mark voucher 'active' with
-          valid_from=now, valid_until=now+plan.duration_seconds
-     │
-     ▼  deliver the code
-TWO channels, always:
-  ▶ Telegram message (primary, free) — if telegram_chat_id present
-  ▶ SMS fallback via Termii / Africa's Talking (cheap) — if user gave a phone
-     │
-     ▼
-[User] types code into the Chilli portal → Section 6 flow grants internet.
-```
+Network map
 
-- **Redemption (confirmed):** the printed **code alone** is the credential (12-char, `secrets.token_urlsafe`). It is **one-time and single-user** — binds to the first device MAC that redeems it (Simultaneous-Use = 1) and can be used only once. A "day" voucher expires **15 hours** after activation, not 24.
+Buildings
 
-### 9.3 API surface (FastAPI)
+Users and groups
 
-| Method/Route | Purpose |
-|---|---|
-| `POST /vouchers` | Create a voucher (buy) |
-| `POST /webhooks/payment/{flutterwave,paystack}` | Provider confirmation → activate |
-| `GET/POST /admin/*` | The **FastAPI admin dashboard** (one of the two admin UIs) |
-| `POST /vouchers/{code}/activate` | Bind MAC / first-login hook (optional) |
-| `GET /vouchers/{code}` | Status/remaining time |
-| `POST /otp/request` + `POST /otp/verify` | SMS fallback flow |
-| `GET /health` | Liveness |
+Access policies
 
-### 9.4 Bot↔DB↔RADIUS coupling
+Monitoring
 
-Voucher activation (payment webhook) is the single write that lights the row up. No direct bot→AP coupling exists — the bot only writes to Postgres; FreeRADIUS reads Postgres at auth time. This is why the system is vendor-agnostic and stateless w.r.t. radios.
+Reports and audit
 
----
+Conceptual layout only; these are not live metrics from the existing network.
 
-## 10. Deployment & Ops
+For the visual design, I would retain the current network-map functionality, but make it one section of the application rather than the whole experience. The new interface should be responsive, accessible, fast on ordinary school computers, and usable over the local network even when the external internet is degraded.
 
-### 10.1 Secret handling
+For students, use a separate, minimal connection experience: a school-branded sign-in page, clear connection status, and a way to get help. Do not expose network inventory, administrative actions, or other users' information through the student portal.
 
-- `.env` (gitignored): `DB_URL`, `RADIUS_SECRET`, `TELEGRAM_BOT_TOKEN`, `FLUTTERWAVE_{PUBLIC,SECRET}_KEY`, `PAYSTACK_{PUBLIC,SECRET}_KEY`, `TERMII_API_KEY`, admin-JWT secret.
-- Never commit secrets. `raddb/clients.conf` secret is written by a deploy script from `.env`.
+## 7. Phased implementation roadmap
 
-### 10.2 Services (systemd)
+The roadmap below prioritizes restoring a reliable campus network before building advanced management features. Time estimates are planning ranges, assuming one primary developer and limited hardware budget; they will change after the repository and network inventory are fully validated.
 
-`zyranet-api`, `zyranet-bot`, `freeradius`, `chilli`, `postgresql`, plus `nginx` as reverse proxy (TLS for webhooks). Each gets a unit file under `deploy/systemd/`.
+## 1
 
-### 10.3 Backups
+Phase 1 — Audit and network discovery
 
-- Postgres nightly dump (`pg_dump`) → encrypted off-box.
-- `raddb/` and `chilli.conf` are in git (with secrets templated); restore is redeploy + import dump.
+1–2 weeks
 
-### 10.4 Networking audit checklist (run before wiring ends)
+Foundation
 
-Run **Fing** and answer each — these were the open unknowns:
+- Inventory all routers, APs, outdoor radios, switches, and cable runs.
+- Document building layouts, cable paths, link speeds, and existing IP ranges.
+- Back up the existing database and configurations.
+- Test Starlink performance at different times.
+- Verify which software services currently work and how RADIUS is deployed.
 
-- [ ] ~~Which TP-Link router shows a live WAN to Starlink?~~ **Answered: only router #1 is wired to Starlink** (→ keep #1 as gateway; demote #2 to AP mode or unplug)
-- [ ] Which switches expose a management IP in Fing? (→ managed; label ports) vs which are invisible (→ unmanaged)
-- [ ] Which NanoStation M2 is in **AP (PtMP)** mode (base) and which are **Station (PtMP)** (remotes)? Confirm all remotes share the base SSID.
-- [ ] Are ALL NanoStations/APs in **Bridge** mode (no Router/Double-NAT)?
-- [ ] Where does the guest line terminate — on the router or on the Zyranet server NIC? (must be able to route through Chilli)
-- [ ] Have you labeled every patch cable with its endpoint?
+Exit condition: a verified inventory, current-state topology, and a list of critical gaps.
 
----
+## 2
 
-## 11. Phase Plan
+Phase 2 — Stable network foundation
 
-| Phase | Deliverable | Proof |
-|---|---|---|
-| **1 — Docs** | This document + repo scaffold | Reviewed, signed off |
-| **2 — DB + RADIUS PoC** | Postgres schema, FreeRADIUS + CoovaChilli config, one test voucher that actually grants internet through Chilli | Two demo phones (one each side of the fabric) authenticate with the same generated voucher |
-| **3 — FastAPI + Bot** | Voucher purchase via inline buttons, payment webhook, Telegram + SMS delivery, activation write | A bought voucher activates and immediately works on the portal |
-| **4 — Production migration** | Firewall/zones, callers across all buildings, monitoring, backup cron | Full paid day-pass goes live |
+2–4 weeks
 
----
+- Stabilize the main gateway and building backhaul.
+- Configure the required network separation.
+- Establish a management subnet and secure device administration.
+- Test coverage and capacity in the workspace first.
+- Document rollback and recovery procedures.
 
-## 12. Open Questions
+Exit condition: stable internet and verified isolation in the initial workspace.
 
-Resolved as of this revision: **#1 (single gateway confirmed — only router #1 is wired to Starlink), #3 (Flutterwave + Paystack, per-user unique accounts), #4 (daloraDIUS AND the FastAPI dashboard — both admin UIs), #5 (printed code is the sole credential — one-time, single-user, 15-hour validity).** #2 is set to a working default (server single LAN NIC, Chilli services guest DHCP + forwards to the router) — confirm during Phase 2 wiring.
+## 3
 
-Remaining open items to confirm during implementation:
+Phase 3 — Zyranet core redesign
 
-1. **Guest-subnet reachability check:** when Chilli hands out `172.16.30.0/24`, confirm the gateway router is set to route/NAT the guest subnet upstream (or that guest devices can reach the router's WAN) so internet egress works. This is a `chilli.conf` / router route decision during Phase 2.
-2. **SMS provider:** Termii vs Africa's Talking for the code-only fallback (cheapest per-message; not yet chosen).
-3. **Admin UI scope:** for the FastAPI dashboard — read-only voucher/usage view vs also issuing/revoking vouchers and viewing RADIUS accounting. (daloRADIUS covers the RADIUS accounting slice; decide the overlap.)
+2–4 weeks
 
----
+- Introduce database migrations and new identity models.
+- Remove payment dependencies from the core application.
+- Implement user roles, access policies, device inventory, and audit events.
+- Restrict CORS and harden authentication.
+- Add automated tests for policy enforcement and authorization.
 
-*This document is a design contract. Implementation tracks the phase plan; divergences should be captured here.*
+Exit condition: a tested, payment-independent Zyranet core.
+
+## 4
+
+Phase 4 — Authentication and operations UI
+
+2–4 weeks
+
+- Build school account provisioning and role management.
+- Integrate the chosen RADIUS/captive-portal strategy.
+- Implement the redesigned dashboard and network map.
+- Add monitoring, alerts, reports, and session management.
+- Test student, staff, guest, and administrator workflows.
+
+Exit condition: the ICT team can manage real users and monitor the network through Zyranet.
+
+## 5
+
+Phase 5 — Campus expansion and hardening
+
+2–4 weeks
+
+- Extend service to the remaining buildings.
+- Test 300+ concurrent clients through realistic load tests.
+- Validate failure recovery, backup restoration, and access revocation.
+- Produce school-facing documentation and reports.
+- Evaluate whether a second Starlink or additional APs are justified.
+
+Exit condition: measured campus coverage, documented operating procedures, and a defensible production-readiness decision.
+
+These phases overlap where practical. The indicative total is roughly 9–18 weeks, but the physical network and existing code may introduce additional work. We should not declare production readiness based on the calendar alone.
+
+## 8. Security and operational requirements
+
+For a school, security is not an optional upgrade.
+
+The minimum production requirements should include:
+
+- Administrative MFA, least-privilege roles, secure password storage, token expiry, and revocation.
+- Firewall rules that block guest and student access to management interfaces and unauthorized internal resources.
+- Restricted API and browser access, input validation, rate limiting, and audit logs for sensitive actions.
+- HTTPS for the web dashboard and captive portal wherever credentials are submitted.
+- Secrets supplied at runtime rather than embedded in source code or container images.
+- Automated database backups, an off-device backup copy, and a tested restoration procedure.
+- Monitoring of the gateway, critical uplinks, APs, server health, disk usage, and authentication failures.
+- A documented emergency procedure for restoring internet access if Zyranet is unavailable.
+- Appropriate retention and access controls for student identities and connection logs.
+
+For resilience, authentication and monitoring must be tested separately. A monitoring outage should not disable internet access. If the authentication server fails, the network should follow an explicitly chosen policy rather than silently granting unrestricted access.
+
+## 9. Make it presentable to the school
+
+I would not pitch this as merely a Wi-Fi upgrade. Present it as a managed digital infrastructure project with a measurable outcome.
+
+PROPOSED SCHOOL PROJECT
+
+# Zyranet Campus Connectivity
+
+Reliable internet. Controlled access. Centralized visibility.
+
+A campus-wide connectivity and network operations platform designed to connect school buildings through existing wired and wireless infrastructure, provide appropriate access to students and staff, and give the ICT department a single place to manage and monitor the network.
+
+What the school receives
+
+- Extended internet coverage across 3–5 locations.
+- School-managed access policies and individual authentication.
+- Centralized network monitoring and device inventory.
+- Better control over bandwidth and access to internal resources.
+- Operational reports, incident history, and recovery documentation.
+- A phased upgrade plan that prioritizes reuse of existing equipment.
+
+The school should receive a short implementation proposal containing the current-state network map, target architecture, hardware inventory, risks, phased budget, success criteria, and operating responsibilities. Avoid promising seamless roaming, full device visibility, or 300-user capacity until those capabilities have been tested on the actual hardware.
+
+## 10. What counts as success?
+
+Before going live, agree on measurable acceptance criteria.
+
+| Area           | Acceptance test                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| Coverage       | Required workspaces and buildings pass documented connectivity tests                                  |
+| Capacity       | Load tests demonstrate acceptable performance with a representative 300+ client workload              |
+| Authentication | Each user category can authenticate, and disabled accounts lose access as intended                    |
+| Isolation      | Student and guest devices cannot reach protected management interfaces                                |
+| Monitoring     | The dashboard accurately reflects the telemetry available from each device                            |
+| Recovery       | Database restoration and network recovery procedures are tested                                       |
+| Administration | Authorized ICT staff can manage users, policies, devices, and incidents without direct database edits |
+| Reliability    | WAN outages, failed APs, and unavailable application services generate useful alerts                  |
+
+## 11. Immediate next steps
+
+The highest-value next move is not to start rewriting the frontend. It is to finish the hardware and code inventory so the software architecture matches what can actually be deployed.
+
+I recommend doing these tasks in order:
+
+1. Inventory the hardware. Record model numbers and take photos of the labels on the routers, switches, outdoor units, and APs.
+2. Map the buildings and links. Identify which locations are connected by LAN cable and which rely on outdoor wireless bridges.
+3. Verify the current deployment. Establish whether FreeRADIUS and CoovaChilli are running, where they run, and which parts of the existing Zyranet code are operational.
+4. Measure the current network. Record Starlink performance, link speeds, and the busiest areas.
+5. Finalize the target topology and procurement list. Buy only the equipment that closes a verified gap.
+6. Start the repository migration. Build the identity and policy model, remove payment coupling, and introduce tests before replacing the current dashboard.
+
+One final technical point: the current repository is a useful starting point, but the inspection so far is not a full audit of every file or a live test of the network. The next implementation pass should examine the remaining security code, RADIUS configuration, captive-portal configuration, frontend JavaScript, and deployment scripts before any production migration.
+
+My recommendation: stabilize the network first, make school identity and access the core of Zyranet second, and build the polished operations interface on top of those foundations. That gives you a credible system for the school without wasting the hardware and software work you have already invested.
