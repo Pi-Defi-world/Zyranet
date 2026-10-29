@@ -1,0 +1,58 @@
+# ===========================================================================
+# Override for the LAN server: api + bot + radius run in HOST networking
+# so they see the real LAN subnets. DB stays in a container on loopback.
+#
+# CoovaChilli runs NATIVELY on the host (not in Docker) — see network/install-chilli.sh
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.host.yml up -d --build
+# ===========================================================================
+
+services:
+  db:
+    # Base compose already binds 127.0.0.1:5432 — no override needed here. — never exposed to LAN
+
+  api:
+    build: .
+    container_name: zyranet-api
+    network_mode: host
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file: .env
+    environment:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_URL: postgresql+asyncpg://zyranet:change-me@127.0.0.1:5432/zyranet
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  bot:
+    build: .
+    container_name: zyranet-bot
+    network_mode: host
+    command: python -m bot.main
+    env_file: .env
+    environment:
+      DB_HOST: 127.0.0.1
+      DB_URL: postgresql+asyncpg://zyranet:change-me@127.0.0.1:5432/zyranet
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  radius:
+    build: ./radius
+    container_name: zyranet-radius
+    network_mode: host
+    environment:
+      RADIUS_SQL_USER: "zyranet"
+      RADIUS_SQL_PASSWORD: "change-me"
+      RADIUS_SECRET: "${RADIUS_SECRET:-changeme}"
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_NAME: zyranet
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

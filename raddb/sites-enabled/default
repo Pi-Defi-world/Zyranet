@@ -1,0 +1,83 @@
+# ===========================================================================
+# FreeRADIUS default site — used for CoovaChilli (WISPr) guest/auth requests.
+#
+# The captive portal sends Access-Request with:
+#   User-Name     = voucher code (or username)
+#   User-Password = the code
+# rlm_sql + rlm_pap handle the check; radreply (Session-Timeout,
+# Simultaneous-Use) is returned by sql module via the app-written rows.
+#
+# TEMPLATE. If a full FreeRADIUS config already exists on your server, merge
+# the authorize/authenticate sections; do not blindly overwrite.
+# ===========================================================================
+
+authorize {
+    preprocess
+    # Normalise NAS-Identifier etc.
+    suffix
+    chap
+    mschap
+
+    # Pull the voucher's radcheck/radreply rows from Postgres.
+    sql
+
+    # Default deny; the sql module will set Auth-Type only if a row matches.
+    if (!ok) {
+        reject
+    }
+
+    #
+    # Post-auth expiry handling: compare the returned Expiration (written by
+    # the app as Session-Timeout) — this is informational; real enforcement is
+    # via Session-Timeout below.
+    #
+    expiration
+    logintime
+    pap
+}
+
+authenticate {
+    pap
+    chap
+    mschap
+    # Digest requires a dictionary/secret; not needed for CoovaChilli.
+}
+
+post-auth {
+    # Log every successful/failed auth to radpostauth.
+    post-auth
+    sql
+    # Forward WISPr reply attributes so Chilli can grant the session.
+    update reply {
+        Session-Timeout := %{tolower:%{%{reply:Session-Timeout}:-0}}
+    }
+}
+
+preacct {
+    preprocess
+    acct_unique
+    suffix
+}
+
+accounting {
+    acct_unique
+    detail
+    sql
+    # Null accounting for clients that send empty packets.
+    exec
+    if (!ok) {
+        update reply { Acct-Session-Id := %{Acct-Session-Id} }
+    }
+}
+
+session {
+    sql
+}
+
+post-proxy {
+    eap
+}
+
+pre-proxy {
+    eap
+}

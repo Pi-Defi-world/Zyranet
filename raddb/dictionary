@@ -1,0 +1,25 @@
+# ===========================================================================
+# Extra FreeRADIUS dictionary entries for CoovaChilli (WISPr) attributes.
+# This small dictionary is merged into FreeRADIUS. The WISPr attributes are
+# what let Chilli display the portal gateway address to the client, and what
+# let it carry the session id used for MAC re-auth.
+#
+# TEMPLATE. Deploy to /etc/freeradius/3.0/dictionary (or a file included by it).
+# ===========================================================================
+
+# CoovaChilli / WISPr vendor dictionary (a portable subset).
+VENDOR        ChilliSpot               14559
+BEGIN-VENDOR  ChilliSpot
+ATTRIBUTE     ChilliSpot-Ssid          1  string
+ATTRIBUTE     ChilliSpot-DNSErrLifetime 14 integer chip
+END-VENDOR    ChilliSpot
+
+# WISPr (Wireless ISP Roaming) — used by CoovaChilli portal redirect.
+VENDOR        WISPr                    14122
+BEGIN-VENDOR  WISPr
+ATTRIBUTE      WISPr-Redirection-URL             1     string
+ATTRIBUTE      WISPr-Redirection-URL-2           2     string
+ATTRIBUTE      WISPr-Session-Terminate-Time      3     integer
+ATTRIBUTE      WISPr-Bandwidth-Max-Down          4     integer
+ATTRIBUTE      WISPr-Bandwidth-Max-Up            5     integer
+END-VENDOR    WISPr

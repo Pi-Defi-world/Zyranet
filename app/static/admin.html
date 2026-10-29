@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zyranet — Network Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/admin.css" />
+  <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+</head>
+<body>
+  <div id="login-screen" class="login-wrap">
+    <div class="login-card">
+      <div class="login-brand"><span class="brand-mark">ZN</span></div>
+      <h2>Zyranet</h2>
+      <p>Network access control for CET-CreativeZone</p>
+      <form id="login-form">
+        <input class="input" id="login-user" name="username" placeholder="Username" required autocomplete="username" />
+        <input class="input" id="login-pass" name="password" type="password" placeholder="Password" required autocomplete="current-password" />
+        <button class="btn primary" type="submit">Sign in</button>
+      </form>
+      <p id="login-err" class="err"></p>
+    </div>
+  </div>
+
+  <div id="app-shell" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">ZN</div>
+        <div>
+          <h1>Zyranet</h1>
+          <p>CET-CreativeZone · NOC</p>
+        </div>
+        <span class="live-dot" id="live-dot" title="Live"></span>
+      </div>
+      <button type="button" class="nav-btn active" data-page="network"><span class="icon">◈</span> Network map</button>
+      <button type="button" class="nav-btn" data-page="overview"><span class="icon">▣</span> Overview</button>
+      <button type="button" class="nav-btn" data-page="devices"><span class="icon">⬡</span> Devices</button>
+      <button type="button" class="nav-btn" data-page="sessions"><span class="icon">◎</span> Live sessions</button>
+      <button type="button" class="nav-btn" data-page="vouchers"><span class="icon">▤</span> Vouchers</button>
+      <div class="sidebar-zone-legend" id="sidebar-zones"></div>
+      <div class="sidebar-footer">
+        <button type="button" class="nav-btn hidden" id="logout-btn"><span class="icon">⎋</span> Log out</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h2 id="page-title">Network map</h2>
+          <span class="path-hint" id="path-hint">Starlink → gateway → switches → radios → APs → clients</span>
+        </div>
+        <div class="topbar-right">
+          <span class="refresh-badge" id="refresh-badge"><span class="pulse"></span> auto 30s</span>
+          <span class="save-badge hidden" id="save-badge">● saving…</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="page-network">
+          <div class="noc-stats" id="map-stats"></div>
+
+          <div class="noc-controls">
+            <div class="search-box">
+              <span class="search-icon">⌕</span>
+              <input class="input" id="map-search" placeholder="Search node, IP, MAC…  ( / )" autocomplete="off" />
+            </div>
+            <div class="zone-chips" id="zone-chips"></div>
+            <select class="input sm" id="kind-filter" title="Device type">
+              <option value="">All types</option>
+              <option value="wan">WAN</option>
+              <option value="router">Routers</option>
+              <option value="switch">Switches</option>
+              <option value="server">Servers</option>
+              <option value="radio">Radios</option>
+              <option value="ap">APs</option>
+              <option value="service">Services</option>
+              <option value="client">Clients</option>
+              <option value="session">Sessions</option>
+            </select>
+          </div>
+
+          <div class="map-layout">
+            <div class="map-canvas-wrap">
+              <div class="map-toolbar">
+                <div class="tb-group">
+                  <button type="button" class="btn" id="map-fit" title="Fit to screen">⤢ Fit</button>
+                  <button type="button" class="btn" id="map-zoom-in" title="Zoom in">+</button>
+                  <button type="button" class="btn" id="map-zoom-out" title="Zoom out">−</button>
+                  <button type="button" class="btn" id="map-physics" title="Toggle physics">Physics</button>
+                </div>
+                <div class="tb-group">
+                  <button type="button" class="btn warn-toggle" id="map-layout-edit" title="Drag nodes to reposition; auto-saves">✎ Edit layout</button>
+                  <button type="button" class="btn primary" id="map-refresh" title="Reload topology">↻ Refresh</button>
+                </div>
+                <div class="tb-group layer-toggles">
+                  <label class="toggle" title="Show live Wi-Fi clients"><input type="checkbox" id="map-clients" checked /> Clients</label>
+                  <label class="toggle" title="Show RADIUS sessions"><input type="checkbox" id="map-sessions" checked /> Sessions</label>
+                  <label class="toggle" title="Show wireless PtMP links"><input type="checkbox" id="tog-wireless" checked /> Wireless</label>
+                  <label class="toggle" title="Show logical/guest links"><input type="checkbox" id="tog-logical" checked /> Logical</label>
+                </div>
+              </div>
+              <div id="network-map"></div>
+              <div class="map-hoverbar hidden" id="map-hoverbar"></div>
+              <div class="map-legend" id="map-legend">
+                <strong>Map key</strong>
+                <div class="legend-grid">
+                  <div><span class="legend-ic" style="color:#94a3b8">◉</span> WAN</div>
+                  <div><span class="legend-ic" style="color:#60a5fa">▣</span> Router</div>
+                  <div><span class="legend-ic" style="color:#38bdf8">▤</span> Switch</div>
+                  <div><span class="legend-ic" style="color:#fbbf24">▦</span> Server</div>
+                  <div><span class="legend-ic" style="color:#38bdf8">◈</span> Radio PtMP</div>
+                  <div><span class="legend-ic" style="color:#f472b6">✸</span> AP</div>
+                  <div><span class="legend-ic" style="color:#22c55e">●</span> Client</div>
+                  <div><span class="legend-ic" style="color:#a78bfa">⬢</span> Service</div>
+                </div>
+                <div class="legend-cables">
+                  <div><span class="cable eth"></span> Ethernet (port labels on cable)</div>
+                  <div><span class="cable wl"></span> Wireless PtMP</div>
+                  <div><span class="cable log"></span> Logical / guest</div>
+                  <div><span class="cable lldp"></span> LLDP-discovered</div>
+                </div>
+                <div class="muted">Click = inspect · Double-click = focus · Drag in ✎ mode = save position</div>
+              </div>
+            </div>
+            <div class="detail-panel">
+              <div class="panel-head side-tabs">
+                <button type="button" class="side-tab active" data-panel="inspect">Inspect</button>
+                <button type="button" class="side-tab" data-panel="ports">Ports</button>
+                <button type="button" class="side-tab" data-panel="links">Links</button>
+                <button type="button" class="side-tab" data-panel="edit">Add/Edit</button>
+                <button type="button" class="side-tab" data-panel="discover">SNMP</button>
+              </div>
+              <p id="editor-status" class="editor-status muted"></p>
+              <div class="detail-scroll side-panel" data-panel="inspect" id="map-detail">
+                <p class="muted">Click any node to trace its path: uplinks, switch ports, IPs, attached clients and live sessions.</p>
+              </div>
+              <div class="detail-scroll side-panel hidden" data-panel="ports" id="port-panel">
+                <p class="muted">Select a switch to see its front-panel port view.</p>
+              </div>
+              <div class="detail-scroll side-panel hidden" data-panel="links">
+                <div class="form-stack">
+                  <div class="mini-head">New cable</div>
+                  <label>From <select class="input full" id="link-source"></select></label>
+                  <label>From port <input class="input full" id="link-source-port" placeholder="e.g. 4" /></label>
+                  <label>To <select class="input full" id="link-target"></select></label>
+                  <label>To port <input class="input full" id="link-target-port" placeholder="e.g. 1" /></label>
+                  <label>Medium
+                    <select class="input full" id="link-medium">
+                      <option value="ethernet">ethernet</option><option value="wireless">wireless</option><option value="logical">logical</option>
+                    </select>
+                  </label>
+                  <label>Label <input class="input full" id="link-label" placeholder="optional" /></label>
+                  <button type="button" class="btn primary" id="btn-save-link">Add cable</button>
+                </div>
+                <div class="mini-head" style="margin-top:16px">All cables <span class="muted" id="link-count"></span></div>
+                <div id="link-table"></div>
+              </div>
+              <div class="detail-scroll side-panel hidden" data-panel="edit">
+                <div class="form-stack">
+                  <div class="mini-head">Device</div>
+                  <label>Node ID <input class="input full" id="edit-node-id" placeholder="sw-core" /></label>
+                  <label>Label <input class="input full" id="edit-node-label" placeholder="Switch 1 (CORE)" /></label>
+                  <label>Kind
+                    <select class="input full" id="edit-node-kind">
+                      <option value="switch">switch</option><option value="router">router</option><option value="ap">ap</option>
+                      <option value="radio">radio</option><option value="server">server</option><option value="wan">wan</option>
+                      <option value="service">service</option><option value="unknown">unknown</option>
+                    </select>
+                  </label>
+                  <label>Zone
+                    <select class="input full" id="edit-node-zone">
+                      <option value="core">core</option><option value="internet">internet</option><option value="admin">admin</option>
+                      <option value="guest">guest</option><option value="bldg-a">bldg-a</option><option value="bldg-b">bldg-b</option><option value="bldg-c">bldg-c</option>
+                    </select>
+                  </label>
+                  <label>Subtitle <input class="input full" id="edit-node-subtitle" placeholder="role / model" /></label>
+                  <label>Mgmt IP <input class="input full" id="edit-node-mgmt-ip" placeholder="10.10.20.5" /></label>
+                  <label>Switch ports <input class="input full" id="edit-node-ports" type="number" min="1" max="128" placeholder="8" /></label>
+                  <label>SSID <input class="input full" id="edit-node-ssid" /></label>
+                  <div class="toolbar">
+                    <button type="button" class="btn primary" id="btn-save-node">Save</button>
+                    <button type="button" class="btn" id="btn-create-node">Create new</button>
+                    <button type="button" class="btn" id="btn-new-node">Clear</button>
+                    <button type="button" class="btn danger" id="btn-delete-node">Delete</button>
+                  </div>
+                </div>
+              </div>
+              <div class="detail-scroll side-panel hidden" data-panel="discover">
+                <p class="muted">LLDP discovery for managed switches. Set <code>SNMP_ENABLED=true</code> + <code>SNMP_TARGETS</code> in <code>.env</code>.</p>
+                <div class="toolbar" style="margin:12px 0">
+                  <button type="button" class="btn primary" id="btn-snmp-discover">Run discovery</button>
+                  <button type="button" class="btn" id="btn-export-json">Export JSON</button>
+                </div>
+                <div id="discovery-results"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-overview" class="hidden">
+          <div class="toolbar" style="margin-bottom:14px">
+            <button type="button" class="btn" id="refresh-overview">Refresh</button>
+          </div>
+          <div class="grid-stats" id="stats-grid"></div>
+          <div class="panel">
+            <div class="panel-head"><h3>At a glance</h3></div>
+            <div class="panel-body" style="padding:18px">
+              <p class="muted" style="margin:0">Use <strong>Network map</strong> for topology. Voucher sales and RADIUS sessions are in their tabs.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-devices" class="hidden">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Devices <span id="device-count" class="muted"></span></h3>
+              <div class="toolbar">
+                <input class="input" id="device-search" placeholder="Search MAC, IP, vendor…" />
+                <button type="button" class="btn primary" id="scan-devices">Scan now</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <table class="data">
+                <thead>
+                  <tr><th>MAC</th><th>IP</th><th>Vendor</th><th>AP</th><th>Status</th><th>First seen</th><th>Last seen</th></tr>
+                </thead>
+                <tbody id="device-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-sessions" class="hidden">
+          <div class="panel">
+            <div class="panel-head"><h3>Live RADIUS sessions</h3></div>
+            <div class="panel-body">
+              <table class="data">
+                <thead>
+                  <tr><th>User</th><th>IP</th><th>MAC</th><th>NAS</th><th>Started</th><th>Elapsed</th></tr>
+                </thead>
+                <tbody id="session-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-vouchers" class="hidden">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Vouchers</h3>
+              <button type="button" class="btn" id="refresh-vouchers">Refresh</button>
+            </div>
+            <div class="panel-body">
+              <table class="data">
+                <thead>
+                  <tr><th>ID</th><th>Code</th><th>Plan</th><th>Status</th><th>Valid until</th><th>Created</th></tr>
+                </thead>
+                <tbody id="voucher-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/network-map.js"></script>
+  <script src="/static/js/topology-editor.js"></script>
+  <script src="/static/js/admin-app.js"></script>
+</body>
+</html>

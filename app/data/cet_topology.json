@@ -1,0 +1,324 @@
+{
+  "meta": {
+    "name": "CET-CreativeZone",
+    "description": "Physical + logical topology (edit ports and IPs to match your site)",
+    "version": 1
+  },
+  "zones": [
+    { "id": "internet", "label": "Internet", "color": "#64748b" },
+    { "id": "core", "label": "Core / Server room", "color": "#38bdf8" },
+    { "id": "admin", "label": "Admin LAN 10.10.20.0/24", "color": "#a78bfa" },
+    { "id": "guest", "label": "Guest LAN 172.16.30.0/24", "color": "#22c55e" },
+    { "id": "bldg-a", "label": "Building A", "color": "#fbbf24" },
+    { "id": "bldg-b", "label": "Building B", "color": "#fb923c" },
+    { "id": "bldg-c", "label": "Building C", "color": "#f472b6" }
+  ],
+  "nodes": [
+    {
+      "id": "wan-starlink",
+      "label": "Starlink",
+      "kind": "wan",
+      "zone": "internet",
+      "fixed": { "x": 520, "y": 20 }
+    },
+    {
+      "id": "gw-router",
+      "label": "TP-Link Gateway",
+      "subtitle": "NAT · DHCP · Firewall",
+      "kind": "router",
+      "zone": "core",
+      "mgmt_ip": "192.168.0.1",
+      "fixed": { "x": 520, "y": 120 }
+    },
+    {
+      "id": "sw-core",
+      "label": "Switch 1 (CORE)",
+      "kind": "switch",
+      "zone": "core",
+      "ports": 8,
+      "fixed": { "x": 520, "y": 240 }
+    },
+    {
+      "id": "srv-zyranet",
+      "label": "Zyranet Server",
+      "subtitle": "RADIUS · Chilli · API",
+      "kind": "server",
+      "zone": "core",
+      "mgmt_ip": "10.10.20.10",
+      "fixed": { "x": 720, "y": 240 }
+    },
+    {
+      "id": "ns-base",
+      "label": "NanoStation BASE",
+      "subtitle": "PtMP AP",
+      "kind": "radio",
+      "zone": "core",
+      "mgmt_ip": "192.168.1.20",
+      "fixed": { "x": 320, "y": 240 }
+    },
+    {
+      "id": "sw-bldg-a",
+      "label": "Switch 2",
+      "kind": "switch",
+      "zone": "bldg-a",
+      "ports": 8,
+      "fixed": { "x": 180, "y": 380 }
+    },
+    {
+      "id": "sw-bldg-b",
+      "label": "Switch 3",
+      "kind": "switch",
+      "zone": "bldg-b",
+      "ports": 8,
+      "fixed": { "x": 520, "y": 380 }
+    },
+    {
+      "id": "ns-remote-1",
+      "label": "NanoStation REMOTE 1",
+      "kind": "radio",
+      "zone": "bldg-a",
+      "fixed": { "x": 180, "y": 500 }
+    },
+    {
+      "id": "ns-remote-2",
+      "label": "NanoStation REMOTE 2",
+      "kind": "radio",
+      "zone": "bldg-b",
+      "fixed": { "x": 520, "y": 500 }
+    },
+    {
+      "id": "ns-remote-3",
+      "label": "NanoStation REMOTE 3",
+      "kind": "radio",
+      "zone": "bldg-c",
+      "fixed": { "x": 860, "y": 500 }
+    },
+    {
+      "id": "sw-remote-3",
+      "label": "Local switch",
+      "kind": "switch",
+      "zone": "bldg-c",
+      "ports": 8,
+      "fixed": { "x": 860, "y": 380 }
+    },
+    {
+      "id": "ap-bldg-a-1",
+      "label": "Indoor APs (A)",
+      "kind": "ap",
+      "zone": "bldg-a",
+      "ssid": "CET-CreativeZone",
+      "fixed": { "x": 80, "y": 620 }
+    },
+    {
+      "id": "ap-bldg-a-2",
+      "label": "Indoor AP (A-2)",
+      "kind": "ap",
+      "zone": "bldg-a",
+      "ssid": "CET-CreativeZone",
+      "fixed": { "x": 280, "y": 620 }
+    },
+    {
+      "id": "ap-bldg-b-1",
+      "label": "Indoor APs (B)",
+      "kind": "ap",
+      "zone": "bldg-b",
+      "ssid": "CET-CreativeZone",
+      "fixed": { "x": 420, "y": 620 }
+    },
+    {
+      "id": "ap-bldg-b-2",
+      "label": "Indoor AP (B-2)",
+      "kind": "ap",
+      "zone": "bldg-b",
+      "ssid": "CET-CreativeZone",
+      "fixed": { "x": 620, "y": 620 }
+    },
+    {
+      "id": "ap-bldg-c-1",
+      "label": "Indoor APs (C)",
+      "kind": "ap",
+      "zone": "bldg-c",
+      "ssid": "CET-CreativeZone",
+      "fixed": { "x": 860, "y": 620 }
+    },
+    {
+      "id": "portal-chilli",
+      "label": "CoovaChilli",
+      "subtitle": "Captive portal",
+      "kind": "service",
+      "zone": "guest",
+      "fixed": { "x": 720, "y": 360 }
+    }
+  ],
+  "links": [
+    {
+      "id": "lk-wan-gw",
+      "source": "wan-starlink",
+      "target": "gw-router",
+      "target_port": "WAN",
+      "medium": "ethernet",
+      "label": "WAN uplink"
+    },
+    {
+      "id": "lk-gw-sw",
+      "source": "gw-router",
+      "target": "sw-core",
+      "source_port": "LAN",
+      "target_port": "1",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-srv",
+      "source": "sw-core",
+      "target": "srv-zyranet",
+      "source_port": "2",
+      "target_port": "eth0",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ns",
+      "source": "sw-core",
+      "target": "ns-base",
+      "source_port": "3",
+      "target_port": "eth0",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-a",
+      "source": "sw-core",
+      "target": "sw-bldg-a",
+      "source_port": "4",
+      "target_port": "1",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-b",
+      "source": "sw-core",
+      "target": "sw-bldg-b",
+      "source_port": "5",
+      "target_port": "1",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-c",
+      "source": "sw-core",
+      "target": "sw-remote-3",
+      "source_port": "6",
+      "target_port": "1",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-ns-r1",
+      "source": "ns-base",
+      "target": "ns-remote-1",
+      "medium": "wireless",
+      "label": "airMAX PtMP"
+    },
+    {
+      "id": "lk-ns-r2",
+      "source": "ns-base",
+      "target": "ns-remote-2",
+      "medium": "wireless",
+      "label": "airMAX PtMP"
+    },
+    {
+      "id": "lk-ns-r3",
+      "source": "ns-base",
+      "target": "ns-remote-3",
+      "medium": "wireless",
+      "label": "airMAX PtMP"
+    },
+    {
+      "id": "lk-r1-sw",
+      "source": "ns-remote-1",
+      "target": "sw-bldg-a",
+      "source_port": "eth0",
+      "target_port": "2",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-r2-sw",
+      "source": "ns-remote-2",
+      "target": "sw-bldg-b",
+      "source_port": "eth0",
+      "target_port": "2",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-r3-sw",
+      "source": "ns-remote-3",
+      "target": "sw-remote-3",
+      "source_port": "eth0",
+      "target_port": "1",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ap-a1",
+      "source": "sw-bldg-a",
+      "target": "ap-bldg-a-1",
+      "source_port": "3",
+      "target_port": "PoE",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ap-a2",
+      "source": "sw-bldg-a",
+      "target": "ap-bldg-a-2",
+      "source_port": "4",
+      "target_port": "PoE",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ap-b1",
+      "source": "sw-bldg-b",
+      "target": "ap-bldg-b-1",
+      "source_port": "3",
+      "target_port": "PoE",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ap-b2",
+      "source": "sw-bldg-b",
+      "target": "ap-bldg-b-2",
+      "source_port": "4",
+      "target_port": "PoE",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-sw-ap-c1",
+      "source": "sw-remote-3",
+      "target": "ap-bldg-c-1",
+      "source_port": "2",
+      "target_port": "PoE",
+      "medium": "ethernet"
+    },
+    {
+      "id": "lk-srv-portal",
+      "source": "srv-zyranet",
+      "target": "portal-chilli",
+      "medium": "logical",
+      "label": "guest enforcement"
+    },
+    {
+      "id": "lk-portal-gw",
+      "source": "portal-chilli",
+      "target": "gw-router",
+      "medium": "logical",
+      "label": "guest subnet"
+    }
+  ],
+  "client_attachment": {
+    "default_ap": "ap-bldg-b-1",
+    "ap_aliases": {
+      "a": "ap-bldg-a-1",
+      "bldg-a": "ap-bldg-a-1",
+      "building a": "ap-bldg-a-1",
+      "b": "ap-bldg-b-1",
+      "bldg-b": "ap-bldg-b-1",
+      "building b": "ap-bldg-b-1",
+      "c": "ap-bldg-c-1",
+      "bldg-c": "ap-bldg-c-1",
+      "building c": "ap-bldg-c-1"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.git/
+.gitignore
+backups/
+tests/
+docs/
+raddb/
+chilli/
+deploy/
+temp/

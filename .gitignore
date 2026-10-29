@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / runtime
+*.log
+run/
+tmp/
+backups/
+
+# IDE
+.idea/
+.vscode/
+
+# Alembic local
+*.sqlite3
+
+# Binaries
+*.deb

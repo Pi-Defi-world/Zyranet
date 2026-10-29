@@ -1,0 +1,44 @@
+# Minimal FreeRADIUS virtual server for voucher (PAP) auth against Postgres.
+# Handles Access-Request (CoovaChilli WISPr) and Accounting-Request.
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+    }
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1813
+    }
+
+    authorize {
+        preprocess
+        # Pull radcheck + radreply from Postgres for the username (= voucher code).
+        sql
+        # `pap` in authorize sets Auth-Type := PAP when User-Password is present.
+        pap
+    }
+
+    authenticate {
+        pap
+    }
+
+    post-auth {
+        # sql logs every result to radpostauth.
+        sql
+    }
+
+    preacct {
+        preprocess
+    }
+
+    accounting {
+        detail
+        sql
+    }
+
+    session {
+        sql
+    }
+}

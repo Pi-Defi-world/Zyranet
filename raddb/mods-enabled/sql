@@ -1,0 +1,36 @@
+# ===========================================================================
+# FreeRADIUS sql module (rlm_sql) -> PostgreSQL.
+# Read/Write against the standard radcheck/radreply/radacct tables created in
+# db/schema.sql. The application writes voucher rows into these tables (see
+# app/services/radius.py), so FreeRADIUS needs no custom SQL queries.
+#
+# TEMPLATE. Deploy to /etc/freeradius/3.0/mods-enabled/sql and substitute
+# __RADIUS_SQL_USER__ / __RADIUS_SQL_PASSWORD__ from .env.
+# ===========================================================================
+
+sql {
+    dialect = "postgresql"
+    driver = "rlm_sql_postgresql"
+
+    server = "localhost"
+    port = 5432
+    login = "__RADIUS_SQL_USER__"
+    password = "__RADIUS_SQL_PASSWORD__"
+
+    radius_db = "zyranet"
+
+    # Read the authoritative auth/accounting data from the standard tables.
+    read_clients = no
+    # Disable the default group retrieval; we manage users directly.
+    group_attribute = "SQL-Group"
+
+    acct_unique1 = "acctuniqueid"
+    acct_unique2 = "acctsessionid"
+
+    # Fail-close is safer for guest access: if the DB is down, deny.
+    read_groups = no
+    delete_stale_sessions = yes
+
+    # Vendor-specific WISPr/Chilli attributes are handled by the dictionary
+    # (see raddb/dictionary). No extra queries required below.
+}

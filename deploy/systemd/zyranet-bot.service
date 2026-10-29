@@ -1,0 +1,16 @@
+[Unit]
+Description=Zyranet Telegram bot (aiogram)
+After=network.target postgresql.service zyranet-api.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=zyranet
+WorkingDirectory=/opt/zyranet
+EnvironmentFile=/opt/zyranet/.env
+ExecStart=/opt/zyranet/.venv/bin/python -m bot.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
