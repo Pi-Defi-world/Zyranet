@@ -1,22 +1,24 @@
-"""Render RADIUS/Chilli config templates, substituting secrets from .env.
+"""Render the optional FreeRADIUS templates, substituting secrets from .env.
 
-The raddb/ and chilli/ files use __PLACEHOLDER__ tokens so real secrets are
-never committed. Run this during deployment to write actual config to the
-system locations:
+The raddb files use __PLACEHOLDER__ tokens so real secrets are never
+committed. Run this only as part of an approved RADIUS deployment to write
+rendered configuration to the system locations:
 
     python deploy/render_secrets.py \
         --radusers /etc/freeradius/3.0/mods-enabled/sql \
         --radclients /etc/freeradius/3.0/clients.conf \
-        --chilli /etc/chilli/config
-
 Purely mechanical string substitution; no evaluation.
 """
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from app.config import get_settings
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.config import get_settings  # noqa: E402
 
 
 def render(text: str, s) -> str:
@@ -36,16 +38,25 @@ def main() -> None:
     parser.add_argument("--source-targets", nargs="+", help="src=dst pairs", default=[])
     parser.add_argument("--radusers", help="write rendered sql mod to this path")
     parser.add_argument("--radclients", help="write rendered clients.conf to this path")
-    parser.add_argument("--chilli", help="write rendered chilli config to this path")
     args = parser.parse_args()
 
     s = get_settings()
-    root = Path(__file__).resolve().parent.parent
-
+    if args.radusers or args.radclients or args.source_targets:
+        required = {
+            "RADIUS_SECRET": s.radius_secret,
+            "RADIUS_SQL_USER": s.radius_sql_user,
+            "RADIUS_SQL_PASSWORD": s.radius_sql_password,
+        }
+        missing = [
+            name
+            for name, value in required.items()
+            if not value or value.upper().startswith("CHANGE_ME")
+        ]
+        if missing:
+            parser.error(f"configure real RADIUS values before rendering: {', '.join(missing)}")
     targets = {
-        str(root / "raddb/mods-enabled/sql"): args.radusers,
-        str(root / "raddb/clients.conf"): args.radclients,
-        str(root / "chilli/chilli.conf"): args.chilli,
+        str(ROOT / "raddb/mods-enabled/sql"): args.radusers,
+        str(ROOT / "raddb/clients.conf"): args.radclients,
     }
     for src, dst in targets.items():
         if not dst:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +12,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..security import require_admin
 from ..services import scanner
+from ..services.audit import record_audit
 
 router = APIRouter(prefix="/devices", tags=["devices"], dependencies=[Depends(require_admin)])
 
@@ -83,10 +85,28 @@ async def list_sessions(
 
 
 @router.post("/scan")
-async def trigger_scan(session: AsyncSession = Depends(get_session)):
+async def trigger_scan(
+    username: str = Depends(require_admin), session: AsyncSession = Depends(get_session)
+):
     s = get_settings()
-    result = await scanner.scan(session, s.scan_cidr_list)
-    return result
+    if not s.discovery_ready:
+        raise HTTPException(409, "discovery requires enablement and approved scan CIDRs")
+    try:
+        run = await scanner.enqueue_scan(session, s.scan_cidr_list, requested_by=username)
+        await record_audit(
+            session,
+            actor=username,
+            role="admin",
+            action="discovery.run.enqueue",
+            entity_type="discovery_run",
+            entity_id=run.id,
+            detail={"scope": run.scope},
+        )
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(409, "another discovery run is already queued or running") from exc
+    return {"run_id": run.id, "status": run.status}
 
 
 @router.get("/{mac}")

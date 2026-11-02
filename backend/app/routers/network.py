@@ -11,8 +11,7 @@ from ..config import get_settings
 from ..db import get_session
 from ..schemas import TopologyApplyDiscoveryIn, TopologyLinkIn, TopologyNodeIn, TopologyPositionsIn
 from ..security import require_admin
-from ..services import snmp_discover, topology
-from ..services import topology_store
+from ..services import snmp_discover, topology, topology_store
 
 router = APIRouter(prefix="/network", tags=["network"], dependencies=[Depends(require_admin)])
 
@@ -23,13 +22,16 @@ class TopologyDocumentIn(BaseModel):
 
 @router.get("/topology")
 async def get_topology(
-    include_clients: bool = Query(True, description="Attach live scanned devices to APs"),
+    include_clients: bool = Query(
+        True,
+        description="Include current device observations without inferring AP associations",
+    ),
     client_limit: int = Query(80, ge=0, le=200),
     session: AsyncSession = Depends(get_session),
 ):
-    """Full graph for the admin network map (DB layout + live overlay)."""
+    """Recorded layout plus optional unattached device observations."""
     return await topology.build_topology(
-        session, include_clients=include_clients, client_limit=client_limit
+        session, include_observations=include_clients, client_limit=client_limit
     )
 
 

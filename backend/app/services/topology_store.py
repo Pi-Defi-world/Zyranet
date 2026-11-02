@@ -4,14 +4,14 @@ from __future__ import annotations
 import json
 import logging
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import models
+from ..config import get_settings
 
 log = logging.getLogger("zyranet.topology_store")
 
@@ -20,7 +20,7 @@ _DOC_ID = 1
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def load_seed_from_file() -> dict[str, Any]:
@@ -57,7 +57,7 @@ async def save_document(
     session: AsyncSession,
     document: dict[str, Any],
     *,
-    export_file: bool = True,
+    export_file: bool | None = None,
 ) -> dict[str, Any]:
     row = await session.get(models.TopologyDocument, _DOC_ID)
     payload = json.dumps(document)
@@ -68,6 +68,8 @@ async def save_document(
         row.data = payload
         row.updated_at = _now()
     await session.commit()
+    if export_file is None:
+        export_file = get_settings().topology_auto_export
     if export_file:
         try:
             export_document_to_file(document)
@@ -80,7 +82,7 @@ async def patch_positions(
     session: AsyncSession,
     positions: dict[str, dict[str, float]],
     *,
-    export_file: bool = True,
+    export_file: bool | None = None,
 ) -> int:
     doc = await get_document(session)
     updated = 0
@@ -158,10 +160,18 @@ async def apply_discovered_links(
     """Merge SNMP/LLDP suggested links into the document (skip duplicates)."""
     doc = await get_document(session)
     links = doc.setdefault("links", [])
-    existing = {(lk.get("source"), lk.get("target"), lk.get("source_port"), lk.get("target_port")) for lk in links}
+    existing = {
+        (lk.get("source"), lk.get("target"), lk.get("source_port"), lk.get("target_port"))
+        for lk in links
+    }
     added: list[dict[str, Any]] = []
     for spec in link_specs:
-        key = (spec.get("source"), spec.get("target"), spec.get("source_port"), spec.get("target_port"))
+        key = (
+            spec.get("source"),
+            spec.get("target"),
+            spec.get("source_port"),
+            spec.get("target_port"),
+        )
         if key in existing:
             continue
         spec = {**spec, "id": spec.get("id") or _new_link_id(), "discovered": True}

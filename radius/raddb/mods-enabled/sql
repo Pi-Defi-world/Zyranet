@@ -1,7 +1,7 @@
 # FreeRADIUS sql module -> PostgreSQL.
 # We set the connection + read the standard radcheck/radreply/radacct tables
-# that the Zyranet app writes (app/services/radius.py). The actual SQL queries
-# come from the dialect's queries.conf (authorize/accounting).
+# that an approved identity workflow provisions. The actual SQL queries come
+# from the dialect's queries.conf (authorize/accounting).
 sql {
     dialect = "postgresql"
     driver = "rlm_sql_postgresql"
@@ -12,7 +12,7 @@ sql {
     password = "__RADIUS_SQL_PASSWORD__"
     radius_db = "__DB_NAME__"
 
-    # We manage users directly (no group/realm tables in use).
+    # Group and realm policy are not enabled in the current application.
     read_clients = no
     read_groups = no
     group_attribute = "SQL-Group"

@@ -34,11 +34,13 @@ async def test_topology_seed_and_positions(tmp_path, monkeypatch):
     async with TestSession() as session:
         doc = await topology_store.get_document(session)
         assert doc.get("nodes")
-        n = await topology_store.patch_positions(session, {"sw-core": {"x": 100, "y": 200}})
+        n = await topology_store.patch_positions(
+            session, {"wan-starlink-a": {"x": 100, "y": 200}}
+        )
         assert n == 1
         doc2 = await topology_store.get_document(session)
-        sw = next(x for x in doc2["nodes"] if x["id"] == "sw-core")
-        assert sw["fixed"]["x"] == 100
+        wan = next(x for x in doc2["nodes"] if x["id"] == "wan-starlink-a")
+        assert wan["fixed"]["x"] == 100
 
 
 @pytest.mark.asyncio

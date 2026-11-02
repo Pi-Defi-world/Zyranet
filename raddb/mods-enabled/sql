@@ -1,8 +1,8 @@
 # ===========================================================================
 # FreeRADIUS sql module (rlm_sql) -> PostgreSQL.
 # Read/Write against the standard radcheck/radreply/radacct tables created in
-# db/schema.sql. The application writes voucher rows into these tables (see
-# app/services/radius.py), so FreeRADIUS needs no custom SQL queries.
+# backend/db/schema.sql. The SQL tables are an optional authentication and
+# accounting integration; identity provisioning is not enabled in the app.
 #
 # TEMPLATE. Deploy to /etc/freeradius/3.0/mods-enabled/sql and substitute
 # __RADIUS_SQL_USER__ / __RADIUS_SQL_PASSWORD__ from .env.
@@ -21,7 +21,7 @@ sql {
 
     # Read the authoritative auth/accounting data from the standard tables.
     read_clients = no
-    # Disable the default group retrieval; we manage users directly.
+    # Group policy is not enabled in the current application release.
     group_attribute = "SQL-Group"
 
     acct_unique1 = "acctuniqueid"

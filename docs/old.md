@@ -1,5 +1,11 @@
 # Zyranet — Network Access & Billing Architecture
 
+> **Historical design (paid voucher phase).** This document is retained for
+> legacy context. It is superseded as the institutional direction by
+> `technical_docs1.md` and `proposal.md`, which define free campus access and a
+> University-funded Zyranet service. Do not treat the hardware or topology
+> assumptions below as verified current-state facts.
+
 **Status:** Design (v1)
 **Owner:** Zyranet (standalone project)
 **Scope:** Vendor-agnostic paid Wi-Fi access control for the CET-CreativeZone network

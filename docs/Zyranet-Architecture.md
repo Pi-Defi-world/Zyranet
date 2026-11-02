@@ -1,5 +1,11 @@
 # Zyranet redesign plan — campus connectivity for 300+ users
 
+> **Earlier planning draft.** The later institutional baseline and software
+> delivery gates are in `technical_docs1.md` and `proposal.md` (30 October
+> 2026). Use those newer documents for population, WAN, access-policy, and
+> rollout assumptions; this document remains useful for its target architecture
+> and phased reasoning, but is not an as-built record.
+
 The discovery answers point to a clear strategy: build a low-cost, centrally managed campus network that can grow without requiring you to replace all the old equipment.
 
 The design must support 3–5 buildings, a converted workspace, 300+ concurrent users, one Starlink connection initially, and a possible second connection later. Because the equipment models are not yet known, we should avoid buying a complete new network before testing what you already own.
