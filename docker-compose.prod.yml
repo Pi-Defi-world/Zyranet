@@ -1,10 +1,13 @@
 # ===========================================================================
 # Zyranet production deploy — Linux Mint server
 #
-# PostgreSQL + FreeRADIUS run natively on the host.
-# API + Bot run in Docker, connecting to native services.
+# API and network discovery worker run in Docker with host networking.
+# Confirm the real database and management-network topology before deployment.
+# Network authentication is conditional and is not enabled by this overlay.
 #
-# Usage:
+# The API binds loopback and must be reached through the installed TLS proxy.
+# Apply migrations explicitly after a verified database backup:
+#   docker compose -f docker-compose.prod.yml run --rm migrate
 #   docker compose -f docker-compose.prod.yml up -d --build
 # ===========================================================================
 
@@ -13,22 +16,54 @@ services:
     build: .
     container_name: zyranet-api
     network_mode: host
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"]
     env_file: .env
     environment:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
-      DB_URL: postgresql+asyncpg://zyranet:change-me@127.0.0.1:5432/zyranet
+      DB_URL: ""
+      APP_ENV: production
+      TRUST_PROXY_HEADERS: "true"
+      TOPOLOGY_AUTO_EXPORT: "false"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
-  bot:
+  worker:
     build: .
-    container_name: zyranet-bot
+    container_name: zyranet-worker
     network_mode: host
-    command: python -m bot.main
+    command: python -m app.worker
     env_file: .env
     environment:
       DB_HOST: 127.0.0.1
       DB_PORT: "5432"
-      DB_URL: postgresql+asyncpg://zyranet:change-me@127.0.0.1:5432/zyranet
+      DB_URL: ""
+      APP_ENV: production
+    cap_add:
+      - NET_RAW
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
+
+  migrate:
+    build: .
+    container_name: zyranet-migrate
+    network_mode: host
+    command: ["alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_URL: ""
+      APP_ENV: production
+    profiles: ["ops"]

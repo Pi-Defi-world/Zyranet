@@ -1,11 +1,6 @@
 FROM debian:bookworm-slim
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    RADIUS_SECRET=changeme \
-    RADIUS_SQL_USER=raduser \
-    RADIUS_SQL_PASSWORD=changeme \
-    DB_HOST=db \
-    DB_NAME=zyranet
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends freeradius freeradius-postgresql \
@@ -14,9 +9,7 @@ RUN apt-get update && \
     usermod -s /bin/bash freerad && \
     mkdir -p /var/log/freeradius && chown freerad:freerad /var/log/freeradius
 
-# Drop in our config (clients + sql module + a minimal autz/autht site).
-# clients.conf replaces the Debian default (which uses secret=testing123 and
-# does not $INCLUDE clients.d/).
+# Drop in our config (loopback-only client + SQL module + minimal auth site).
 COPY raddb/clients.conf /etc/freeradius/3.0/clients.conf
 COPY raddb/mods-enabled/sql /etc/freeradius/3.0/mods-enabled/sql
 COPY raddb/sites/default /etc/freeradius/3.0/sites-enabled/default

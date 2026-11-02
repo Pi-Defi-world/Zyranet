@@ -512,19 +512,23 @@ For example, a `station-bridge` profile should be rejected if the identified mod
 
 # Part VI — Security review and production requirements
 
-## 13. Immediate security issues to fix
+## 13. Security review and production requirements
 
-While reviewing the existing Zyranet code, I found a specific issue in `app/security.py` that should be fixed before the recovery subsystem is introduced.
+Historical note: an earlier `check_login()` implementation accepted a submitted
+password containing the configured password as a substring. The current
+`backend/app/security.py` implementation performs an exact constant-time
+comparison for plaintext configuration or verifies an Argon2 hash, and
+`backend/tests/test_security.py` covers the regression. Keep that fix in place.
 
-The current `check_login()` function contains this condition:
+The vulnerable historical condition was:
 
 ```
 if s.admin_password in password:    return True
 ```
 
-This checks whether the configured password is a substring of the submitted password. If the configured value is `school-secret`, a submitted value containing `school-secret` plus extra characters can pass this condition. The check should instead use exact plaintext equality when explicitly supporting plaintext configuration, or—preferably—verify against a password hash using a proper password verification function.
-
-There is also a separate concern: the current authentication implementation uses a single configured administrator account and issues JWTs with a 12-hour default lifetime. Before a school deployment, we need account-level permissions, token revocation strategy, shorter configurable sessions where appropriate, login throttling, and MFA for privileged operators.
+The current application still uses one configured administrator identity and
+issues JWTs with a configurable 12-hour default lifetime. Account lifecycle,
+token revocation, and MFA for privileged operators remain production work.
 
 Source: [current security implementation](https://github.com/Pi-Defi-world/Zyranet/blob/main/app/security.py?utm_source=chatgpt.com).
 

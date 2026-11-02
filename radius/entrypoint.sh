@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Render FreeRADIUS secrets from env vars, then start radiusd.
-set -e
+set -euo pipefail
+
+: "${RADIUS_SECRET:?RADIUS_SECRET is required}"
+: "${RADIUS_SQL_USER:?RADIUS_SQL_USER is required}"
+: "${RADIUS_SQL_PASSWORD:?RADIUS_SQL_PASSWORD is required}"
+: "${DB_HOST:?DB_HOST is required}"
+: "${DB_NAME:?DB_NAME is required}"
 
 RADBASE=/etc/freeradius/3.0
 

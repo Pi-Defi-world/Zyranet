@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "name": "AUE Campus Network",
+    "description": "Planning baseline. Physical paths, device models and service health require field verification.",
+    "version": 2,
+    "status": "unverified",
+    "source": "docs/proposal.md"
+  },
+  "zones": [
+    { "id": "internet", "label": "Internet services", "color": "#38bdf8" },
+    { "id": "campus", "label": "Campus network (audit pending)", "color": "#a78bfa" }
+  ],
+  "nodes": [
+    {
+      "id": "wan-starlink-a",
+      "label": "Starlink A",
+      "kind": "wan",
+      "zone": "internet",
+      "subtitle": "Project access confirmed; health unverified",
+      "verification_status": "reported",
+      "source": "docs/proposal.md",
+      "fixed": { "x": 300, "y": 120 }
+    },
+    {
+      "id": "wan-starlink-b",
+      "label": "Starlink B",
+      "kind": "wan",
+      "zone": "internet",
+      "subtitle": "Project access confirmed; health unverified",
+      "verification_status": "reported",
+      "source": "docs/proposal.md",
+      "fixed": { "x": 700, "y": 120 }
+    },
+    {
+      "id": "campus-network",
+      "label": "Existing campus network",
+      "kind": "unknown",
+      "zone": "campus",
+      "subtitle": "Inventory, device roles and links pending field audit",
+      "verification_status": "unverified",
+      "source": "docs/technical_docs1.md",
+      "fixed": { "x": 500, "y": 420 }
+    }
+  ],
+  "links": []
+}
